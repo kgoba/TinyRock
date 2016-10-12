@@ -18,7 +18,9 @@
 
 #include <avr/sleep.h>
 
+#include "I2C.h"
 #include "LIS3MDL.h"
+#include "MS5607.h"
 #include "tiny.hh"
 
 // 0 for normal operation, 1 for debug (serial output)
@@ -48,6 +50,8 @@ DigitalOut<PortB::pin1> buzzer;
 
 const char *endl = "\r\n";
 
+I2C bus;
+BarometerSimple baroSensor(bus);
 LIS3MDL magSensor;
 
 void testI2C();
@@ -55,7 +59,7 @@ void testLED();
 void flashID(uint8_t id);
 
 void initPyro();
-void initMagSensor();
+void initSensors();
 void resetCalibration();
 
 void calibrate(int16_t mx, int16_t my, int16_t mz);
@@ -136,7 +140,7 @@ void setup()
   gBuzzerMode = kBUZZER_SILENT;
 
   initPyro();
-  initMagSensor();
+  initSensors();
 
   resetCalibration();
   gIsDescent = false;
@@ -168,13 +172,22 @@ void loop()
     bit_clear(gFlags, kFLAG_MEASURE);
 
     int16_t   mx, my, mz;
-    uint16_t  pressure;
+    uint16_t  pressure, pressureComp;
     bool magOK = magSensor.readMag(mx, my, mz);
-    bool baroOK = true; // baroSensor.readPressure();
+    bool baroOK = baroSensor.update();
 
-    //if (baroOK) gAltitude = calculateAltitude(pressure);
+    if (baroOK) {
+      pressure = baroSensor.getPressure();
+      if (gZeroPressure != 0) {
+        pressureComp = (uint32_t)pressure * 25325 / gZeroPressure;
+      }
+      else {
+        pressureComp = pressure;
+      }
+      gAltitude = baroSensor.getAltitude(pressureComp);
+    }
 
-    dbg << pressure << " * " << mx << " / " << my << " / " << mz << " | " << gZeroY << endl;
+    dbg << pressureComp << " / " << gAltitude << " * " << mx << " / " << my << " / " << mz << " | " << gZeroY << endl;
 
     bool doEject = magOK && (my > gZeroY);
 
@@ -373,7 +386,7 @@ void calibrate(int16_t mx, int16_t my, int16_t mz)
 
 void calibrateBaro(uint16_t pressure)
 {
-  static uint32_t sum;
+  static uint32_t  sum;
   static uint16_t  count;
 
   sum += pressure;
@@ -420,7 +433,7 @@ void errorHalt() {
   }
 }
 
-void initMagSensor() {
+void initSensors() {
   bool magReady = false;
   for (uint8_t nTry = 10; nTry > 0; nTry--) {
     dbg << "Initializing magfield sensor" << endl;
@@ -433,6 +446,20 @@ void initMagSensor() {
     delay(500);
   }
   if (!magReady) {
+    errorHalt();
+  }
+
+  bool baroReady = false;
+  for (uint8_t nTry = 10; nTry > 0; nTry--) {
+    dbg << "Initializing pressure sensor" << endl;
+    baroReady = baroSensor.initialize();
+    if (baroReady) {
+      dbg << "Barometer ready" << endl;
+      break;
+    }
+    delay(500);
+  }
+  if (!baroReady) {
     errorHalt();
   }
 }

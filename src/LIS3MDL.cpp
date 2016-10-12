@@ -1,12 +1,11 @@
 #include "LIS3MDL.h"
+#include "TinyWireM.h"
 
 #include "tiny.hh"
 
-#include <TinyWireM.h>
 
 
 bool LIS3MDL::begin(uint8_t SA1pin) {
-  TinyWireM.begin();
   slaveAddress = (SA1pin) ? 0b0011110 : 0b0011100;
 
   // Try to read device ID
